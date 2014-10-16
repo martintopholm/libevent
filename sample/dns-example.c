@@ -37,6 +37,17 @@
 #define u32 ev_uint32_t
 #define u8 ev_uint8_t
 
+/* FIXME: structure is static and thus tightly coupled */
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 64
+#endif
+struct srvent {
+	unsigned short priority;
+	unsigned short weight;
+	unsigned short port;
+	char name[HOST_NAME_MAX];
+};
+
 static const char *
 debug_ntoa(u32 address)
 {
@@ -60,6 +71,10 @@ main_callback(int result, char type, int count, int ttl,
 			printf("%s: %s\n", n, debug_ntoa(((u32*)addrs)[i]));
 		} else if (type == DNS_PTR) {
 			printf("%s: %s\n", n, ((char**)addrs)[i]);
+		} else if (type == DNS_SRV) {
+			struct srvent *ent = addrs;
+			printf("%s: prio=%d weight=%d port=%d %s\n", n,
+			    ent[i].priority, ent[i].weight, ent[i].port, ent[i].name);
 		}
 	}
 	if (!count) {
@@ -142,7 +157,7 @@ logfn(int is_warn, const char *msg) {
 int
 main(int c, char **v) {
 	int idx;
-	int reverse = 0, servertest = 0, use_getaddrinfo = 0;
+	int reverse = 0, srvrecord = 0, servertest = 0, use_getaddrinfo = 0;
 	struct event_base *event_base = NULL;
 	struct evdns_base *evdns_base = NULL;
 	const char *resolv_conf = NULL;
@@ -155,6 +170,8 @@ main(int c, char **v) {
 	while (idx < c && v[idx][0] == '-') {
 		if (!strcmp(v[idx], "-x"))
 			reverse = 1;
+		else if (!strcmp(v[idx], "-s"))
+			srvrecord = 1;
 		else if (!strcmp(v[idx], "-v"))
 			verbose = 1;
 		else if (!strcmp(v[idx], "-g"))
@@ -227,6 +244,9 @@ main(int c, char **v) {
 			}
 			fprintf(stderr, "resolving %s...\n",v[idx]);
 			evdns_base_resolve_reverse(evdns_base, &addr, 0, main_callback, v[idx]);
+		} else if (srvrecord) {
+			fprintf(stderr, "resolving %s...\n",v[idx]);
+			evdns_base_resolve_srv(evdns_base, v[idx], 0, main_callback, v[idx]);
 		} else if (use_getaddrinfo) {
 			struct evutil_addrinfo hints;
 			memset(&hints, 0, sizeof(hints));
