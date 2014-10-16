@@ -144,6 +144,13 @@ extern "C" {
 /* For integer types. */
 #include <event2/util.h>
 
+struct evdns_srv_reply {
+	unsigned short priority;
+	unsigned short weight;
+	unsigned short port;
+	char *name;
+};
+
 /** Error codes 0-5 are as described in RFC 1035. */
 #define DNS_ERR_NONE 0
 /** The name server was unable to interpret the query */
@@ -176,6 +183,7 @@ extern "C" {
 #define DNS_IPv4_A 1
 #define DNS_PTR 2
 #define DNS_IPv6_AAAA 3
+#define DNS_SRV 4
 
 #define DNS_QUERY_NO_SEARCH 1
 
@@ -408,6 +416,32 @@ EVENT2_EXPORT_SYMBOL
 struct evdns_request *evdns_base_resolve_reverse_ipv6(struct evdns_base *base, const struct in6_addr *in, int flags, evdns_callback_type callback, void *ptr);
 
 /**
+  Lookup an SRV record for a given name.
+
+  @param base the evdns_base to which to apply this operation
+  @param name a DNS hostname
+  @param flags either 0, or DNS_QUERY_NO_SEARCH to disable searching for this query.
+  @param callback a callback function to invoke when the request is completed
+  @param ptr an argument to pass to the callback function
+  @return an evdns_request object if successful, or NULL if an error occurred.
+  @see evdns_resolve_ipv6(), evdns_resolve_reverse(), evdns_resolve_reverse_ipv6(), evdns_cancel_request()
+ */
+EVENT2_EXPORT_SYMBOL
+struct evdns_request *evdns_base_resolve_srv(struct evdns_base *base, const char *name, int flags, evdns_callback_type callback, void *ptr);
+
+/**
+  Pick SRV entry out of a set according to priorities (lower is better)
+  and weights (relative probability). Records with zero port are
+  considered in the selection process.
+
+  @param count the number of entries in the set.
+  @param ent array of srv records (e.g. as return by callbacks
+  @return evdns_srv_reply struct chosen
+  @see evdns_resolve_ipv6(), evdns_resolve_reverse(), evdns_resolve_reverse_ipv6(), evdns_cancel_request()
+ */
+EVENT2_EXPORT_SYMBOL
+struct evdns_srv_reply *evdns_srv_pick(int count, struct evdns_srv_reply *ent);
+/**
   Cancels a pending DNS resolution request.
 
   @param base the evdns_base that was used to make the request
@@ -597,6 +631,7 @@ typedef void (*evdns_request_callback_fn_type)(struct evdns_server_request *, vo
 #define EVDNS_TYPE_MX	  15
 #define EVDNS_TYPE_TXT	  16
 #define EVDNS_TYPE_AAAA	  28
+#define EVDNS_TYPE_SRV	  33
 
 #define EVDNS_QTYPE_AXFR 252
 #define EVDNS_QTYPE_ALL	 255

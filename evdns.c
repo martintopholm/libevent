@@ -140,6 +140,7 @@
 /* that we bother recording */
 #define MAX_V4_ADDRS 32
 #define MAX_V6_ADDRS 32
+#define MAX_SRV_ENT 10
 
 
 #define TYPE_A	       EVDNS_TYPE_A
@@ -147,6 +148,7 @@
 #define TYPE_PTR       EVDNS_TYPE_PTR
 #define TYPE_SOA       EVDNS_TYPE_SOA
 #define TYPE_AAAA      EVDNS_TYPE_AAAA
+#define TYPE_SRV       EVDNS_TYPE_SRV
 
 #define CLASS_INET     EVDNS_CLASS_INET
 
@@ -196,6 +198,12 @@ struct request {
 	struct evdns_request *handle;
 };
 
+struct srv_ent {
+	u16 priority;
+	u16 weight;
+	u16 port;
+	char name[HOST_NAME_MAX];
+};
 struct reply {
 	unsigned int type;
 	unsigned int have_answer : 1;
@@ -211,6 +219,10 @@ struct reply {
 		struct {
 			char name[HOST_NAME_MAX];
 		} ptr;
+		struct {
+			u32 addrcount;
+			struct srv_ent entry[MAX_SRV_ENT];
+		} srv;
 	} data;
 };
 
@@ -804,6 +816,25 @@ reply_run_callback(struct event_callback *d, void *user_pointer)
 		else
 			cb->user_callback(cb->err, 0, 0, cb->ttl, NULL, user_pointer);
 		break;
+	case TYPE_SRV:
+		if (cb->have_reply) {
+			struct evdns_srv_reply srv_reply[MAX_SRV_ENT];
+			struct srv_ent *ptr = cb->reply.data.srv.entry;
+			size_t i;
+			for (i=0; i<cb->reply.data.srv.addrcount && i<MAX_SRV_ENT; i++) {
+				srv_reply[i].priority = ptr[i].priority;
+				srv_reply[i].weight = ptr[i].weight;
+				srv_reply[i].port = ptr[i].port;
+				srv_reply[i].name = ptr[i].name;
+			}
+			cb->user_callback(DNS_ERR_NONE, DNS_SRV,
+			    cb->reply.data.srv.addrcount, cb->ttl,
+			    srv_reply,
+			    user_pointer);
+		} else {
+			cb->user_callback(cb->err, 0, 0, cb->ttl, NULL, user_pointer);
+		}
+		break;
 	default:
 		EVUTIL_ASSERT(0);
 	}
@@ -1153,6 +1184,30 @@ reply_parse(struct evdns_base *base, u8 *packet, int length) {
 			j += 16*addrtocopy;
 			reply.have_answer = 1;
 			if (reply.data.aaaa.addrcount == MAX_V6_ADDRS) break;
+		} else if (type == TYPE_SRV && class == CLASS_INET) {
+			/* data = <priority:u16><weight:u16><port:u16><target:name> */
+			int recordend = j + datalength;
+			int recordidx = reply.data.srv.addrcount;
+			if (req->request_type != TYPE_SRV) {
+				j += datalength;
+				continue;
+			}
+			if (recordidx >= MAX_SRV_ENT) {
+				j += datalength;
+				continue;
+			}
+			GET16(reply.data.srv.entry[recordidx].priority);
+			GET16(reply.data.srv.entry[recordidx].weight);
+			GET16(reply.data.srv.entry[recordidx].port);
+			if (name_parse(packet, length, &j,
+				    reply.data.srv.entry[recordidx].name,
+				    sizeof(reply.data.srv.entry[recordidx].name))<0)
+				goto err;
+			if (j != recordend)
+				goto err;
+			reply.data.srv.addrcount += 1;
+			ttl_r = MIN(ttl_r, ttl);
+			reply.have_answer = 1;
 		} else {
 			/* skip over any other type of resource */
 			j += datalength;
@@ -2985,6 +3040,101 @@ int evdns_resolve_reverse_ipv6(const struct in6_addr *in, int flags, evdns_callb
 		? 0 : -1;
 }
 
+/* exported function */
+struct evdns_request *
+evdns_base_resolve_srv(struct evdns_base *base, const char *name, int flags,
+    evdns_callback_type callback, void *ptr) {
+	struct evdns_request *handle;
+	struct request *req;
+	log(EVDNS_LOG_DEBUG, "Resolve requested for %s", name);
+	handle = mm_calloc(1, sizeof(*handle));
+	if (handle == NULL)
+		return NULL;
+	EVDNS_LOCK(base);
+	if (flags & DNS_QUERY_NO_SEARCH) {
+		req =
+			request_new(base, handle, TYPE_SRV, name, flags,
+				    callback, ptr);
+		if (req)
+			request_submit(req);
+	} else {
+		search_request_new(base, handle, TYPE_SRV, name, flags,
+		    callback, ptr);
+	}
+	if (handle->current_req == NULL) {
+		mm_free(handle);
+		handle = NULL;
+	}
+	EVDNS_UNLOCK(base);
+	return handle;
+}
+
+/*
+ * Arrange SRV records first after priority (smaller comes first) then
+ * after weight (heigher comes first).
+ */
+static int
+srv_sort(const void *ptr_a, const void *ptr_b)
+{
+	const struct evdns_srv_reply *ent_a = ptr_a;
+	const struct evdns_srv_reply *ent_b = ptr_b;
+
+	return (ent_a->priority - ent_b->priority) ?
+	    (ent_a->priority - ent_b->priority) :
+	    (ent_b->weight - ent_a->weight);
+}
+
+/* exported function */
+struct evdns_srv_reply *
+evdns_srv_pick(int count, struct evdns_srv_reply *ent)
+{
+	int prio;
+	int weight;
+	int i_head;
+	int i;
+	int rnd;
+
+	/* Sort and find best (smallest) available priority. */
+	qsort(ent, count, sizeof(*ent), srv_sort);
+	for (i = 0; i < count; i++) {
+		if (ent[i].port != 0) {
+			prio = ent[i].priority;
+			break;
+		}
+	}
+	if (i >= count)
+		return NULL;
+	else
+		i_head = i;
+
+	/* Sum weights for selected priority or count entries if no
+	 * weights are present. */
+	if (ent[i].weight > 0) {
+		for (weight = 0; i < count && prio == ent[i].priority; i++) {
+			if (ent[i].port != 0)
+				weight += ent[i].weight;
+		}
+		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
+		rnd &= 0xffff;
+		rnd %= weight;
+		for (i = i_head; i < count; i++) {
+			if (ent[i].port > 0)
+				rnd -= ent[i].weight;
+			if (rnd < 0)
+				break;
+		}
+		return ent + i;
+	} else {
+		for (weight = 0; i < count && prio == ent[i].priority; i++) {
+			weight++;
+		}
+		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
+		rnd &= 0xffff;
+		rnd %= weight;
+		return ent + i_head + rnd;
+	}
+}
+
 /* ================================================================= */
 /* Search support */
 /* */
@@ -3166,7 +3316,7 @@ search_request_new(struct evdns_base *base, struct evdns_request *handle,
 		   int type, const char *const name, int flags,
 		   evdns_callback_type user_callback, void *user_arg) {
 	ASSERT_LOCKED(base);
-	EVUTIL_ASSERT(type == TYPE_A || type == TYPE_AAAA);
+	EVUTIL_ASSERT(type == TYPE_A || type == TYPE_AAAA || type == TYPE_SRV);
 	EVUTIL_ASSERT(handle->current_req == NULL);
 	if ( ((flags & DNS_QUERY_NO_SEARCH) == 0) &&
 	     base->global_search_state &&
