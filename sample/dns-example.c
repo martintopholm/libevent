@@ -41,12 +41,6 @@
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 64
 #endif
-struct srvent {
-	unsigned short priority;
-	unsigned short weight;
-	unsigned short port;
-	char name[HOST_NAME_MAX];
-};
 
 static const char *
 debug_ntoa(u32 address)
@@ -72,7 +66,7 @@ main_callback(int result, char type, int count, int ttl,
 		} else if (type == DNS_PTR) {
 			printf("%s: %s\n", n, ((char**)addrs)[i]);
 		} else if (type == DNS_SRV) {
-			struct srvent *ent = addrs;
+			struct evdns_srv_reply *ent = addrs;
 			printf("%s: prio=%d weight=%d port=%d %s\n", n,
 			    ent[i].priority, ent[i].weight, ent[i].port, ent[i].name);
 		}

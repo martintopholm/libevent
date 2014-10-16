@@ -144,6 +144,13 @@ extern "C" {
 /* For integer types. */
 #include <event2/util.h>
 
+struct evdns_srv_reply {
+	unsigned short priority;
+	unsigned short weight;
+	unsigned short port;
+	char *name;
+};
+
 /** Error codes 0-5 are as described in RFC 1035. */
 #define DNS_ERR_NONE 0
 /** The name server was unable to interpret the query */

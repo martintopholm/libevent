@@ -198,6 +198,12 @@ struct request {
 	struct evdns_request *handle;
 };
 
+struct srv_ent {
+	u16 priority;
+	u16 weight;
+	u16 port;
+	char name[HOST_NAME_MAX];
+};
 struct reply {
 	unsigned int type;
 	unsigned int have_answer : 1;
@@ -215,12 +221,7 @@ struct reply {
 		} ptr;
 		struct {
 			u32 addrcount;
-			struct {
-				u16 priority;
-				u16 weight;
-				u16 port;
-				char name[HOST_NAME_MAX];
-			} entry[MAX_SRV_ENT];
+			struct srv_ent entry[MAX_SRV_ENT];
 		} srv;
 	} data;
 };
@@ -816,13 +817,23 @@ reply_run_callback(struct event_callback *d, void *user_pointer)
 			cb->user_callback(cb->err, 0, 0, cb->ttl, NULL, user_pointer);
 		break;
 	case TYPE_SRV:
-		if (cb->have_reply)
+		if (cb->have_reply) {
+			struct evdns_srv_reply srv_reply[MAX_SRV_ENT];
+			struct srv_ent *ptr = cb->reply.data.srv.entry;
+			size_t i;
+			for (i=0; i<cb->reply.data.srv.addrcount && i<MAX_SRV_ENT; i++) {
+				srv_reply[i].priority = ptr[i].priority;
+				srv_reply[i].weight = ptr[i].weight;
+				srv_reply[i].port = ptr[i].port;
+				srv_reply[i].name = ptr[i].name;
+			}
 			cb->user_callback(DNS_ERR_NONE, DNS_SRV,
 			    cb->reply.data.srv.addrcount, cb->ttl,
-			    cb->reply.data.srv.entry,
+			    srv_reply,
 			    user_pointer);
-		else
+		} else {
 			cb->user_callback(cb->err, 0, 0, cb->ttl, NULL, user_pointer);
+		}
 		break;
 	default:
 		EVUTIL_ASSERT(0);
