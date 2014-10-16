@@ -37,11 +37,6 @@
 #define u32 ev_uint32_t
 #define u8 ev_uint8_t
 
-/* FIXME: structure is static and thus tightly coupled */
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 64
-#endif
-
 static const char *
 debug_ntoa(u32 address)
 {
