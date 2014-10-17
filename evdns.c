@@ -3066,6 +3066,74 @@ evdns_base_resolve_srv(struct evdns_base *base, const char *name, int flags,
 	EVDNS_UNLOCK(base);
 	return handle;
 }
+
+/*
+ * Arrange SRV records first after priority (smaller comes first) then
+ * after weight (heigher comes first).
+ */
+static int
+srv_sort(const void *ptr_a, const void *ptr_b)
+{
+	const struct evdns_srv_reply *ent_a = ptr_a;
+	const struct evdns_srv_reply *ent_b = ptr_b;
+
+	return (ent_a->priority - ent_b->priority) ?
+	    (ent_a->priority - ent_b->priority) :
+	    (ent_b->weight - ent_a->weight);
+}
+
+/* exported function */
+struct evdns_srv_reply *
+evdns_srv_pick(int count, struct evdns_srv_reply *ent)
+{
+	int prio;
+	int weight;
+	int i_head;
+	int i;
+	int rnd;
+
+	/* Sort and find best (smallest) available priority. */
+	qsort(ent, count, sizeof(*ent), srv_sort);
+	for (i = 0; i < count; i++) {
+		if (ent[i].port != 0) {
+			prio = ent[i].priority;
+			break;
+		}
+	}
+	if (i >= count)
+		return NULL;
+	else
+		i_head = i;
+
+	/* Sum weights for selected priority or count entries if no
+	 * weights are present. */
+	if (ent[i].weight > 0) {
+		for (weight = 0; i < count && prio == ent[i].priority; i++) {
+			if (ent[i].port != 0)
+				weight += ent[i].weight;
+		}
+		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
+		rnd &= 0xffff;
+		rnd %= weight;
+		for (i = i_head; i < count; i++) {
+			printf("i=%d rnd=%d ent[i].weight=%d\n", i, rnd, ent[i].weight);
+			if (ent[i].port > 0)
+				rnd -= ent[i].weight;
+			if (rnd < 0)
+				break;
+		}
+		return ent + i;
+	} else {
+		for (weight = 0; i < count && prio == ent[i].priority; i++) {
+			weight++;
+		}
+		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
+		rnd &= 0xffff;
+		rnd %= weight;
+		return ent + i_head + rnd;
+	}
+}
+
 /* ================================================================= */
 /* Search support */
 /* */

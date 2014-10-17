@@ -428,6 +428,18 @@ struct evdns_request *evdns_base_resolve_reverse_ipv6(struct evdns_base *base, c
  */
 EVENT2_EXPORT_SYMBOL
 struct evdns_request *evdns_base_resolve_srv(struct evdns_base *base, const char *name, int flags, evdns_callback_type callback, void *ptr);
+
+/**
+  Pick SRV entry out of a set according to priorities (lower is better)
+  and weights (relative probability).
+
+  @param count the number of entries in the set.
+  @param ent array of srv records (e.g. as return by callbacks
+  @return evdns_srv_reply struct chosen
+  @see evdns_resolve_ipv6(), evdns_resolve_reverse(), evdns_resolve_reverse_ipv6(), evdns_cancel_request()
+ */
+EVENT2_EXPORT_SYMBOL
+struct evdns_srv_reply *evdns_srv_pick(int count, struct evdns_srv_reply *ent);
 /**
   Cancels a pending DNS resolution request.
 

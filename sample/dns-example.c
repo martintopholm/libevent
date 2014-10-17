@@ -50,87 +50,20 @@ debug_ntoa(u32 address)
 	return buf;
 }
 
-/*
- * Arrange SRV records first after priority (smaller comes first) then
- * after weight (heigher comes first).
- */
-static int
-srv_sort(const void *ptr_a, const void *ptr_b)
-{
-	const struct evdns_srv_reply *ent_a = ptr_a;
-	const struct evdns_srv_reply *ent_b = ptr_b;
-
-	return (ent_a->priority - ent_b->priority) ?
-	    (ent_a->priority - ent_b->priority) :
-	    (ent_b->weight - ent_a->weight);
-}
-
-static int
-srv_pick(int count, struct evdns_srv_reply *ent)
-{
-	int prio;
-	int weight;
-	int i_head;
-	int i;
-	int rnd;
-
-	/* Sort and find best (smallest) available priority. */
-	qsort(ent, count, sizeof(*ent), srv_sort);
-	for (i = 0; i < count; i++) {
-		if (ent[i].port != 0) {
-			prio = ent[i].priority;
-			break;
-		}
-	}
-	if (i >= count)
-		return -1;
-	else
-		i_head = i;
-
-	/* Sum weights for selected priority or count entries if no
-	 * weights are present. */
-	if (ent[i].weight > 0) {
-		for (weight = 0; i < count && prio == ent[i].priority; i++) {
-			if (ent[i].port != 0)
-				weight += ent[i].weight;
-		}
-		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
-		rnd &= 0xffff;
-		rnd %= weight;
-		for (i = i_head; i < count; i++) {
-			printf("i=%d rnd=%d ent[i].weight=%d\n", i, rnd, ent[i].weight);
-			if (ent[i].port > 0)
-				rnd -= ent[i].weight;
-			if (rnd < 0)
-				break;
-		}
-		return i;
-	} else {
-		for (weight = 0; i < count && prio == ent[i].priority; i++) {
-			weight++;
-		}
-		evutil_secure_rng_get_bytes(&rnd, sizeof(rnd));
-		rnd &= 0xffff;
-		rnd %= weight;
-		return i_head + rnd;
-	}
-}
-
 static void
 main_callback(int result, char type, int count, int ttl,
 			  void *addrs, void *orig) {
+	struct evdns_srv_reply *srv;
 	char *n = (char*)orig;
 	int i;
-	int srv_idx = 0;
 
-	if (type == DNS_SRV)
-		srv_idx = srv_pick(count, addrs);
-	{
-		struct evdns_srv_reply *ent = addrs;
-		ent[0].port = 0;
-		ent[1].port = 0;
+	if (type == DNS_SRV) {
+		srv = evdns_srv_pick(count, addrs);
+		srv->port = 0;
+		srv = evdns_srv_pick(count, addrs);
+		srv->port = 0;
 		printf("---\n");
-		srv_idx = srv_pick(count, addrs);
+		srv = evdns_srv_pick(count, addrs);
 	}
 	for (i = 0; i < count; ++i) {
 		if (type == DNS_IPv4_A) {
@@ -141,7 +74,7 @@ main_callback(int result, char type, int count, int ttl,
 			struct evdns_srv_reply *ent = addrs;
 			printf("%s: prio=%d weight=%d port=%d %s%s\n", n,
 			    ent[i].priority, ent[i].weight, ent[i].port,
-			    ent[i].name, srv_idx == i ? " (selected)" : "");
+			    ent[i].name, srv == ent + i ? " (selected)" : "");
 		}
 	}
 	if (!count) {
