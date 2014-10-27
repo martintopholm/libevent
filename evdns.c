@@ -3114,7 +3114,6 @@ evdns_srv_pick(int count, struct evdns_srv_reply *ent)
 		rnd &= 0xffff;
 		rnd %= weight;
 		for (i = i_head; i < count; i++) {
-			printf("i=%d rnd=%d ent[i].weight=%d\n", i, rnd, ent[i].weight);
 			if (ent[i].port > 0)
 				rnd -= ent[i].weight;
 			if (rnd < 0)
