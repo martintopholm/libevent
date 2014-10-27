@@ -59,10 +59,7 @@ main_callback(int result, char type, int count, int ttl,
 
 	if (type == DNS_SRV) {
 		srv = evdns_srv_pick(count, addrs);
-		srv->port = 0;
-		srv = evdns_srv_pick(count, addrs);
-		srv->port = 0;
-		printf("---\n");
+		srv->port = 0; /* claim first pick'ed server to be down */
 		srv = evdns_srv_pick(count, addrs);
 	}
 	for (i = 0; i < count; ++i) {
