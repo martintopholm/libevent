@@ -431,7 +431,8 @@ struct evdns_request *evdns_base_resolve_srv(struct evdns_base *base, const char
 
 /**
   Pick SRV entry out of a set according to priorities (lower is better)
-  and weights (relative probability).
+  and weights (relative probability). Records with zero port are
+  considered in the selection process.
 
   @param count the number of entries in the set.
   @param ent array of srv records (e.g. as return by callbacks
