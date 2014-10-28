@@ -1188,10 +1188,14 @@ reply_parse(struct evdns_base *base, u8 *packet, int length) {
 			/* data = <priority:u16><weight:u16><port:u16><target:name> */
 			int recordend = j + datalength;
 			int recordidx = reply.data.srv.addrcount;
-			if (req->request_type != TYPE_SRV)
-				j += datalength; continue;
-			if (recordidx >= MAX_SRV_ENT)
-				j += datalength; continue;
+			if (req->request_type != TYPE_SRV) {
+				j += datalength;
+				continue;
+			}
+			if (recordidx >= MAX_SRV_ENT) {
+				j += datalength;
+				continue;
+			}
 			GET16(reply.data.srv.entry[recordidx].priority);
 			GET16(reply.data.srv.entry[recordidx].weight);
 			GET16(reply.data.srv.entry[recordidx].port);
